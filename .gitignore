@@ -1,0 +1,23 @@
+# Vivado
+.Xil/
+.cache/
+.hw/
+.ip_user_files/
+.sim/
+.gen/
+.runs/
+
+*.jou
+*.log
+*.str
+*.pb
+*.wdb
+*.wcfg
+*.tmp
+
+# VS Code
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini
