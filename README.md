@@ -1,55 +1,67 @@
 # Pipelined FIR Accelerator for FPGA using Verilog
 
-## Overview
+A modular **16-tap FIR (Finite Impulse Response) accelerator** implemented in **Verilog HDL**, targeting the **AMD/Xilinx Artix-7 FPGA** family. The design was developed and analyzed using **AMD Vivado 2026.1**.
 
-This project implements a modular **16-tap Finite Impulse Response (FIR) accelerator** in Verilog HDL. The design targets AMD/Xilinx Artix-7 FPGAs and was developed using AMD Vivado.
-
-The accelerator accepts streaming signed 16-bit input samples and computes the FIR output using a parallel multiply-accumulate architecture. During implementation, the design was optimized by introducing a pipeline stage in the reduction tree to eliminate setup timing violations and successfully meet a 100 MHz clock constraint.
+The project demonstrates the complete RTL design flow—from architecture design and functional simulation to synthesis, implementation, timing analysis, and timing optimization. A pipelined reduction tree was introduced to eliminate setup timing violations and successfully achieve timing closure at **100 MHz**.
 
 ---
 
 ## Features
 
 - 16-tap signed FIR filter
-- Streaming input interface using `valid_in`
-- Parallel multiplication of all taps
-- Balanced reduction tree for accumulation
 - Modular RTL architecture
+- Streaming input interface (`valid_in`)
+- Parallel multiplication using 16 concurrent multipliers
+- Balanced reduction tree for accumulation
 - Pipelined reduction tree for timing optimization
 - Behavioral simulation testbench
-- Synthesized and implemented in AMD Vivado
+- Complete synthesis and implementation using AMD Vivado
 
 ---
 
-## Architecture
+# Architecture
+
+The FIR accelerator consists of five primary modules:
 
 ```
-                     +-------------------+
-sample_in ---------->|   Window Buffer   |
-                     +-------------------+
-                               |
-                               |
-                     +-------------------+
-                     | Coefficient Bank  |
-                     +-------------------+
-                               |
-                               |
-                     +-------------------+
-                     |  Product Engine   |
-                     | (16 Multipliers)  |
-                     +-------------------+
-                               |
-                               |
-                     +-------------------+
-                     | Pipelined         |
-                     | Reduction Tree    |
-                     +-------------------+
-                               |
-                               |
-                           sample_out
+                     sample_in
+                         │
+                         ▼
+                   +-------------+
+                   |  fir_core   |
+                   +-------------+
+                         │
+         ┌───────────────┴───────────────┐
+         ▼                               ▼
++------------------+          +------------------+
+| Window Buffer    |          | Coefficient Bank |
++------------------+          +------------------+
+         │                               │
+         └───────────────┬───────────────┘
+                         ▼
+          +-------------------------------+
+          | Product Engine                |
+          | (16 Parallel Multipliers)     |
+          +-------------------------------+
+                         │
+                         ▼
+             +-------------------------+
+             | Pipelined Reduction Tree|
+             +-------------------------+
+                         │
+                         ▼
+                    sample_out
 ```
 
-The design hierarchy is organized as
+A higher-quality version of this diagram is available in:
+
+```
+docs/architecture.png
+```
+
+---
+
+# Design Hierarchy
 
 ```
 fir_accelerator
@@ -58,6 +70,12 @@ fir_accelerator
             ├── coefficient_bank
             ├── product_engine
             └── reduction_tree
+```
+
+Hierarchy screenshot:
+
+```
+docs/rtl_hierarchy.png
 ```
 
 ---
@@ -72,31 +90,34 @@ Top-level wrapper responsible for interfacing the FIR core with the external sys
 
 ## fir_core
 
-Implements the complete FIR datapath and instantiates all functional modules.
+Implements the complete FIR datapath.
 
-Responsibilities include
+Responsibilities include:
 
-- sample counting
-- valid signal generation
-- module integration
+- Module integration
+- Sample counting
+- Valid signal generation
+- Datapath control
 
 ---
 
 ## window_buffer
 
-Maintains the most recent 16 input samples.
+Maintains the most recent sixteen input samples.
 
-- shifts only when `valid_in` is asserted
-- stores signed 16-bit samples
-- forms the FIR sliding window
+Features:
+
+- 16 × 16-bit signed storage
+- Updates only when `valid_in` is asserted
+- Implements the FIR sliding window
 
 ---
 
 ## coefficient_bank
 
-Provides the FIR coefficients.
+Stores the FIR coefficients.
 
-The current implementation stores coefficients as Verilog parameters, allowing future replacement by ROM, RAM, or programmable register banks without changing the datapath.
+The current implementation uses constant Verilog parameters. The modular design allows future replacement with ROM, RAM, or programmable register banks without modifying the datapath.
 
 ---
 
@@ -104,174 +125,245 @@ The current implementation stores coefficients as Verilog parameters, allowing f
 
 Performs sixteen signed multiplications in parallel.
 
-Inputs
+Inputs:
 
-- samples from the window buffer
-- coefficients from the coefficient bank
+- Window buffer samples
+- FIR coefficients
 
-Outputs
+Outputs:
 
-- sixteen 32-bit products
+- Sixteen 32-bit products
 
 ---
 
 ## reduction_tree
 
-Accumulates the sixteen products using a balanced adder tree.
+Accumulates the sixteen products using a balanced binary adder tree.
 
-The optimized implementation inserts pipeline registers after the second level of additions, reducing the combinational critical path.
+The optimized implementation introduces a pipeline stage after the second addition level to reduce the critical path.
+
+---
+
+# Design Flow
+
+The project was developed following the standard FPGA RTL workflow:
+
+1. RTL Design
+2. Functional Simulation
+3. Synthesis
+4. Implementation
+5. Timing Analysis
+6. Timing Optimization
+7. Resource Utilization Analysis
 
 ---
 
 # Timing Optimization
 
-## Initial implementation
+## Initial Design
 
 The original reduction tree consisted of four consecutive addition stages.
 
 ```
-Multipliers
-
-↓
-
-L1 Adders
-
-↓
-
-L2 Adders
-
-↓
-
-L3 Adders
-
-↓
-
+16 Products
+     │
+Level 1
+     │
+Level 2
+     │
+Level 3
+     │
 Final Adder
+     │
+Output Register
 ```
 
-Vivado reported a setup timing violation due to the long combinational path extending from the window buffer registers to the output register.
+This resulted in a long combinational path extending from the window buffer registers to the output register.
 
 ### Timing Summary (Before Optimization)
 
 | Metric | Value |
-|--------|-------|
-| Worst Negative Slack | -1.157 ns |
-| Total Negative Slack | -10.135 ns |
-| Timing | Failed |
+|---------|------:|
+| Worst Negative Slack (WNS) | **-1.157 ns** |
+| Total Negative Slack (TNS) | **-10.135 ns** |
+| Timing Constraints | **Failed** |
+
+Screenshot:
+
+```
+docs/timing_summary_before.png
+```
 
 ---
 
-## Optimized implementation
+## Optimized Design
 
-Pipeline registers were inserted after the second addition stage.
+Pipeline registers were inserted after **Level 2** of the reduction tree.
+
+This divided the long combinational path into two shorter paths, reducing the setup delay and achieving timing closure.
+
+Pipeline illustration:
 
 ```
-Multipliers
-
-↓
-
-L1 Adders
-
-↓
-
-L2 Adders
-
-↓
-
-Pipeline Registers
-
-↓
-
-L3 Adders
-
-↓
-
-Final Adder
-
-↓
-
-Output Register
+docs/pipeline_optimization.png
 ```
-
-This reduced the longest combinational delay while increasing the number of sequential elements.
 
 ### Timing Summary (After Optimization)
 
 | Metric | Value |
-|--------|-------|
-| Worst Negative Slack | +1.643 ns |
-| Total Negative Slack | 0 ns |
-| Timing | Passed |
+|---------|------:|
+| Worst Negative Slack (WNS) | **+1.643 ns** |
+| Total Negative Slack (TNS) | **0.000 ns** |
+| Timing Constraints | **Passed** |
+
+Screenshot:
+
+```
+docs/timing_summary_after.png
+```
+
+---
+
+# Critical Path Analysis
+
+Before optimization, the longest combinational path consisted of:
+
+```
+Multiplier
+        ↓
+4 Addition Levels
+        ↓
+Output Register
+```
+
+After pipelining:
+
+```
+Multiplier
+        ↓
+2 Addition Levels
+        ↓
+Pipeline Registers
+        ↓
+2 Addition Levels
+        ↓
+Output Register
+```
+
+Representative timing report:
+
+```
+docs/critical_path_after.png
+```
 
 ---
 
 # Resource Utilization
 
 | Resource | Used |
-|----------|-----:|
+|----------|------:|
 | Slice LUTs | 658 |
 | Slice Registers | 472 |
 | DSP48 | 0 |
 | BRAM | 0 |
 | BUFG | 1 |
 
-The design is implemented entirely using FPGA logic resources. For the current operand widths, Vivado inferred LUT-based multipliers rather than DSP blocks.
+Hierarchical utilization report:
+
+```
+docs/utilization_hierarchy.png
+```
+
+The multipliers were implemented using FPGA logic resources for the current operand widths. Vivado did not infer DSP blocks for this implementation.
 
 ---
 
-# Simulation
+# Functional Simulation
 
-Behavioral simulation was used to verify
+Behavioral simulation was performed to verify:
 
-- reset operation
-- streaming input processing
-- valid signal handling
-- FIR output generation
-- handling of invalid (bubble) cycles
+- Reset operation
+- Streaming input processing
+- Sliding window operation
+- Parallel multiply-accumulate functionality
+- Bubble (invalid cycle) handling
+- Pipeline latency
 
-Representative simulation waveforms are included in the `docs` directory.
+Representative waveform(s):
+
+```
+docs/waveform.png
+```
+
+(or replace with your final waveform filename if different)
+
+---
+
+# Results Summary
+
+| Parameter | Before | After |
+|-----------|--------|-------|
+| Worst Negative Slack | -1.157 ns | +1.643 ns |
+| Timing Constraints | Failed | Passed |
+| Slice LUTs | 658 | 658 |
+| Slice Registers | 298 | 472 |
+| Pipeline Stages | 0 | 1 |
+
+The optimization successfully eliminated setup timing violations while maintaining the same combinational logic utilization. The increase in register count corresponds to the additional pipeline stage introduced into the reduction tree.
 
 ---
 
 # Repository Structure
 
+```text
+fir_accelerator_fpga/
+
+├── rtl/
+│   ├── fir_accelerator.v
+│   ├── fir_core.v
+│   ├── window_buffer.v
+│   ├── coefficient_bank.v
+│   ├── multiplier.v
+│   ├── product_engine.v
+│   └── reduction_tree.v
+│
+├── tb/
+│   └── tb_fir_core.v
+│
+├── constraints/
+│   └── fir_accelerator.xdc
+│
+├── docs/
+│   ├── architecture.png
+│   ├── pipeline_optimization.png
+│   ├── rtl_hierarchy.png
+│   ├── rtl_schematic.png
+│   ├── timing_summary_before.png
+│   ├── timing_summary_after.png
+│   ├── critical_path_after.png
+│   ├── utilization_hierarchy.png
+│   └── waveform.png
+│
+├── README.md
+├── results.md
+├── LICENSE
+└── .gitignore
 ```
-rtl/
-    fir_accelerator.v
-    fir_core.v
-    window_buffer.v
-    coefficient_bank.v
-    multiplier.v
-    product_engine.v
-    reduction_tree.v
 
-tb/
-    tb_fir_core.v
-
-constraints/
-    clock_constraints.xdc
-
-docs/
-    rtl_hierarchy.png
-    rtl_schematic.png
-    timing_summary.png
-    timing_paths.png
-    utilization_hierarchy.png
-    waveform.png
-```
+*(Update the waveform filename if you decide to keep two waveform images instead of one.)*
 
 ---
 
 # Future Work
 
-Possible extensions include
+Possible extensions include:
 
 - Runtime-programmable coefficient memory
 - DSP48-based multiplier implementation
-- Multi-stage pipelining for higher frequencies
+- Multi-stage pipelining for higher operating frequencies
 - AXI-Stream interface
 - FPGA board deployment
-- Enhanced latency-aware regression testbench
+- Enhanced latency-aware verification environment
 
 ---
 
@@ -279,7 +371,7 @@ Possible extensions include
 
 - Verilog HDL
 - AMD Vivado 2026.1
-- Artix-7 (XC7A35T-CPG236-1)
+- AMD/Xilinx Artix-7 FPGA (XC7A35T-CPG236-1)
 
 ---
 
