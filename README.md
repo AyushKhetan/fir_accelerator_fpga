@@ -249,14 +249,14 @@ tb/
     tb_fir_core.v
 
 constraints/
-    fir_accelerator.xdc
+    clock_constraints.xdc
 
 docs/
     rtl_hierarchy.png
     rtl_schematic.png
     timing_summary.png
     timing_paths.png
-    hierarchical_utilization.png
+    utilization_hierarchy.png
     waveform.png
 ```
 
